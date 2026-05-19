@@ -39,7 +39,9 @@ ensure ptv_cityhall
 
 - Diese Ausgabe ist als Version `1.0` gesetzt (`fxmanifest.lua` und `Config.Version`).
 - Der Updatechecker schreibt beim Resource-Start in die CFX-Konsole.
-- Damit echte Updates erkannt werden, muss `Config.UpdateChecker.Url` auf eine Raw-Text- oder JSON-Datei zeigen.
+- Der Updatechecker ist auf `https://api.github.com/repos/PlanktonTVT/ptv_cityhall/releases/latest` eingestellt.
+- Der Download-Link zeigt auf `https://github.com/PlanktonTVT/ptv_cityhall/releases/latest`.
+- Damit echte Updates erkannt werden, muss auf GitHub immer die neueste Release-Version als Release angelegt sein.
 - Als Text reicht eine Datei, deren erste Zeile die neuste Version enthaelt, z. B. `1.0`.
 - Als JSON werden Felder wie `version`, `latest`, `latestVersion` oder `tag_name` erkannt; optional auch `download`, `downloadUrl`, `url`, `html_url`, `changelog`, `notes` oder `body`.
 - Manuell kann der Check in der CFX-Konsole mit `ptv_cityhall_updatecheck` gestartet werden.
