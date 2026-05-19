@@ -852,13 +852,11 @@ function openListingActionMenu(listing, categoryKey, taxRate)
             {
                 label = 'Preisuebersicht',
                 value = 'noop',
-                desc = ('Preis/Stk: %s | Gesamt: %s | Steuer %.2f%%: %s | Rahmen: %s-%s'):format(
+                desc = ('Preis/Stk: %s | Gesamt: %s | Steuer %.2f%%: %s'):format(
                     money(listing.price_each),
                     money(total),
                     taxRate,
-                    money(tax),
-                    money(listing.minPrice),
-                    money(listing.maxPrice)
+                    money(tax)
                 )
             },
             { label = 'Kaufen', value = 'buy', listingId = listing.id, desc = ('Vom Verkaeufer %s kaufen.'):format(listing.seller_name) },
@@ -877,7 +875,7 @@ function openListingActionMenu(listing, categoryKey, taxRate)
             menu.displayInput({
                 inputType = 'number',
                 header = 'Neuer Preis pro Stueck',
-                placeholder = ('%s bis %s'):format(money(listing.minPrice), money(listing.maxPrice)),
+                placeholder = 'Preis pro Stueck',
                 buttons = { confirm = 'Setzen', cancel = 'Abbrechen' },
                 maxLength = 10,
                 pattern = 'money'
@@ -919,9 +917,7 @@ function openInventoryForListing(categoryKey)
             maxAmount = item.count,
             minAmount = item.minAmount,
             configMaxAmount = item.maxAmount,
-            minPrice = item.minPrice,
-            maxPrice = item.maxPrice,
-            desc = ('Menge: %s-%s | Preis: %s-%s'):format(item.minAmount, item.maxAmount, money(item.minPrice), money(item.maxPrice))
+            desc = ('Menge: %s-%s'):format(item.minAmount, item.maxAmount)
         }
     end
     if #elements == 0 then
@@ -969,7 +965,7 @@ function openInventoryForListing(categoryKey)
             menu.displayInput({
                 inputType = 'number',
                 header = 'Preis pro Stueck',
-                placeholder = ('%s bis %s'):format(money(item.minPrice), money(item.maxPrice)),
+                placeholder = 'Preis pro Stueck',
                 buttons = { confirm = 'Einstellen', cancel = 'Abbrechen' },
                 maxLength = 10,
                 pattern = 'money'

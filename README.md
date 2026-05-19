@@ -131,7 +131,7 @@ Scrollbar-Farben, Breite und Rundung werden direkt in `html/style.css` ueber die
 - Die erlaubten Markthallen-Items werden in `Config.Market.Categories` gepflegt.
 - Standardmaessig gibt es die Reiter `Waren` und `Waffen`.
 - Nur Items, die dort eingetragen sind, erscheinen im Markthallenfenster.
-- Pro Item kannst du Label, Mindest-/Maximalmenge und Mindest-/Maximalpreis setzen.
+- Pro Item kannst du Label, Mindest-/Maximalmenge, Einkaufspreis und Verkaufspreis setzen.
 - Pro Item kannst du `buyPrice`, `sellPrice` und `initialStock` setzen.
 - Mit `Config.Market.UseConfigPrices = true` werden die `buyPrice`-/`sellPrice`-Werte aus der Config bei jedem Start und Oeffnen auf jede Markthalle uebernommen.
 - Die Markthalle hat einen eigenen Bestand pro Stadt in `bm_market_stock`.
@@ -139,6 +139,7 @@ Scrollbar-Farben, Breite und Rundung werden direkt in `html/style.css` ueber die
 - Bürgermeister/Admins sehen im Verwaltungsfenster ein Markthallenlager, koennen Bestand kostenlos entnehmen oder Bestand exportieren.
 - Exports, Entnahmen und Aktivieren/Deaktivieren werden im Reiter `Logs` angezeigt und bei aktivem Discord-Webhook gepostet.
 - Die Verwaltung ist in Unterregister aufgeteilt: `Verwaltung`, `Bürger`, `Exports` und `Logs`.
+- Logs werden in `bm_ledger` gespeichert und koennen pro Stadt mit `/bm_admin [stadtkey] clearlogs confirm` zurueckgesetzt werden, z. B. `/bm_admin valentine clearlogs confirm`.
 - Beim Export wird Bestand vernichtet und `Config.Market.ExportPercent` des Gesamtwerts der entnommenen Menge in die Stadtkasse gebucht.
 - Normale Spieler koennen konfigurierte Waren und Waffen direkt im Fenster kaufen und verkaufen.
 - Jede Zeile zeigt Markthallenbestand, deinen eigenen Inventarbestand, Einkaufspreis mit Einkaufsteuer, Verkaufspreis mit Verkaufsteuer und ein Mengenfeld.
@@ -163,13 +164,13 @@ Config.Market.Categories = {
     goods = {
         label = 'Waren',
         items = {
-            bread = { label = 'Brot', minAmount = 1, maxAmount = 25, minPrice = 0.10, maxPrice = 25.00, buyPrice = 2.00, sellPrice = 1.00, initialStock = 25 }
+            bread = { label = 'Brot', minAmount = 1, maxAmount = 25, buyPrice = 2.00, sellPrice = 1.00, initialStock = 25 }
         }
     },
     weapons = {
         label = 'Waffen',
         items = {
-            WEAPON_REVOLVER_CATTLEMAN = { label = 'Cattleman Revolver', minAmount = 1, maxAmount = 1, minPrice = 25.00, maxPrice = 1000.00, buyPrice = 250.00, sellPrice = 125.00, initialStock = 2 }
+            WEAPON_REVOLVER_CATTLEMAN = { label = 'Cattleman Revolver', minAmount = 1, maxAmount = 1, buyPrice = 250.00, sellPrice = 125.00, initialStock = 2 }
         }
     }
 }

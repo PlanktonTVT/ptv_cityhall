@@ -863,10 +863,8 @@ local function marketCatalog()
                     categoryLabel = category.label or categoryKey,
                     minAmount = tonumber(itemConfig.minAmount) or Config.Market.MinAmount,
                     maxAmount = tonumber(itemConfig.maxAmount) or Config.Market.MaxAmount,
-                    minPrice = tonumber(itemConfig.minPrice) or Config.Market.MinPrice,
-                    maxPrice = tonumber(itemConfig.maxPrice) or Config.Market.MaxPrice,
-                    buyPrice = tonumber(itemConfig.buyPrice) or tonumber(itemConfig.minPrice) or Config.Market.MinPrice,
-                    sellPrice = tonumber(itemConfig.sellPrice) or tonumber(itemConfig.buyPrice) or Config.Market.MinPrice,
+                    buyPrice = tonumber(itemConfig.buyPrice) or 0.0,
+                    sellPrice = tonumber(itemConfig.sellPrice) or tonumber(itemConfig.buyPrice) or 0.0,
                     initialStock = tonumber(itemConfig.initialStock) or 0,
                     enabled = itemConfig.enabled ~= false
                 }
@@ -1009,9 +1007,7 @@ local function marketStockRows(townId)
                 stock = tonumber(row.stock) or 0,
                 enabled = dbEnabled(row.enabled),
                 buyPrice = useConfigMarketPrices() and roundMoney(configured.buyPrice) or (tonumber(row.buy_price) or 0),
-                sellPrice = useConfigMarketPrices() and roundMoney(configured.sellPrice) or (tonumber(row.sell_price) or 0),
-                minPrice = configured.minPrice,
-                maxPrice = configured.maxPrice
+                sellPrice = useConfigMarketPrices() and roundMoney(configured.sellPrice) or (tonumber(row.sell_price) or 0)
             }
         end
     end
@@ -1277,6 +1273,10 @@ local function addLedger(townId, entryType, amount, actor, note)
             now()
         }
     )
+end
+
+local function clearLedger(townId)
+    return tonumber(MySQL.update.await('DELETE FROM bm_ledger WHERE town_id = ?', { townId }) or 0)
 end
 
 local function addTreasury(townId, amount, entryType, actor, note)
@@ -2225,8 +2225,8 @@ callback('marketSetPrice', function(source, itemName, buyPrice, sellPrice)
         return { ok = false, message = 'Ware nicht gefunden.' }
     end
 
-    if buyPrice < configured.minPrice or buyPrice > configured.maxPrice or sellPrice < configured.minPrice or sellPrice > configured.maxPrice then
-        return { ok = false, message = ('Preise muessen zwischen %s und %s liegen.'):format(money(configured.minPrice), money(configured.maxPrice)) }
+    if buyPrice < 0 or sellPrice < 0 then
+        return { ok = false, message = 'Preise duerfen nicht negativ sein.' }
     end
 
     MySQL.update.await(
@@ -2497,9 +2497,7 @@ callback('getInventoryItems', function(source, categoryKey)
                 category = configured.category,
                 categoryLabel = configured.categoryLabel,
                 minAmount = configured.minAmount,
-                maxAmount = math.min(count, configured.maxAmount),
-                minPrice = configured.minPrice,
-                maxPrice = configured.maxPrice
+                maxAmount = math.min(count, configured.maxAmount)
             }
         end
     end
@@ -2537,8 +2535,6 @@ callback('getListings', function(source, categoryKey)
             row.item_label = configured.label or row.item_label
             row.category = configured.category
             row.categoryLabel = configured.categoryLabel
-            row.minPrice = configured.minPrice
-            row.maxPrice = configured.maxPrice
             filtered[#filtered + 1] = row
             if #filtered >= Config.Market.MaxActiveListings then
                 break
@@ -3004,8 +3000,8 @@ RegisterNetEvent(RESOURCE .. ':server:createListing', function(itemName, amount,
         return
     end
 
-    if priceEach < configured.minPrice or priceEach > configured.maxPrice then
-        notify(source, ('Preis muss zwischen %s und %s liegen.'):format(money(configured.minPrice), money(configured.maxPrice)))
+    if priceEach <= 0 then
+        notify(source, 'Preis muss groesser als $0.00 sein.')
         return
     end
 
@@ -3322,8 +3318,8 @@ RegisterNetEvent(RESOURCE .. ':server:updateListingPrice', function(listingId, p
         return
     end
 
-    if priceEach < configured.minPrice or priceEach > configured.maxPrice then
-        notify(source, ('Preis muss zwischen %s und %s liegen.'):format(money(configured.minPrice), money(configured.maxPrice)))
+    if priceEach <= 0 then
+        notify(source, 'Preis muss groesser als $0.00 sein.')
         return
     end
 
@@ -3558,7 +3554,7 @@ RegisterCommand(Config.Commands.Admin, function(source, args)
     local sub = tostring(args[1] or ''):lower()
     if sub == '' then
         if source == 0 then
-            notify(source, ('Nutzung: /%s [stadtkey] start [kandidatur_stunden] [wahl_stunden] | end | settax [waren_einkauf] [waren_verkauf] [waffen_einkauf] [waffen_verkauf] | treasury'):format(Config.Commands.Admin))
+            notify(source, ('Nutzung: /%s [stadtkey] start [kandidatur_stunden] [wahl_stunden] | end | settax [waren_einkauf] [waren_verkauf] [waffen_einkauf] [waffen_verkauf] | treasury | clearlogs confirm'):format(Config.Commands.Admin))
             return
         end
 
@@ -3662,8 +3658,17 @@ RegisterCommand(Config.Commands.Admin, function(source, args)
             weapons and weapons.buyRate or 0,
             weapons and weapons.sellRate or 0
         ))
+    elseif sub == 'clearlogs' then
+        if tostring(args[2] or ''):lower() ~= 'confirm' then
+            notify(source, ('Nutzung: /%s [stadtkey] clearlogs confirm'):format(Config.Commands.Admin))
+            return
+        end
+
+        local town = getTown(townContext)
+        local deleted = clearLedger(town.id)
+        notify(source, ('Logs fuer %s zurueckgesetzt. Entfernte Eintraege: %s.'):format(town.name, deleted))
     else
-        notify(source, ('Nutzung: /%s [stadtkey] start [kandidatur_stunden] [wahl_stunden] | end | settax [waren_einkauf] [waren_verkauf] [waffen_einkauf] [waffen_verkauf] | treasury'):format(Config.Commands.Admin))
+        notify(source, ('Nutzung: /%s [stadtkey] start [kandidatur_stunden] [wahl_stunden] | end | settax [waren_einkauf] [waren_verkauf] [waffen_einkauf] [waffen_verkauf] | treasury | clearlogs confirm'):format(Config.Commands.Admin))
     end
 end, false)
 
