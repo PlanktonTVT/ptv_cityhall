@@ -37,14 +37,24 @@ ensure ptv_cityhall
 
 ## Version und Updatechecker
 
-- Diese Ausgabe ist als Version `1.0` gesetzt (`fxmanifest.lua` und `Config.Version`).
+- Diese Ausgabe ist als Version `1.1` gesetzt (`fxmanifest.lua` und `Config.Version`).
 - Der Updatechecker schreibt beim Resource-Start in die CFX-Konsole.
 - Der Updatechecker ist auf `https://api.github.com/repos/PlanktonTVT/ptv_cityhall/releases/latest` eingestellt.
 - Der Download-Link zeigt auf `https://github.com/PlanktonTVT/ptv_cityhall/releases/latest`.
 - Damit echte Updates erkannt werden, muss auf GitHub immer die neueste Release-Version als Release angelegt sein.
-- Als Text reicht eine Datei, deren erste Zeile die neuste Version enthaelt, z. B. `1.0`.
+- Als Text reicht eine Datei, deren erste Zeile die neuste Version enthaelt, z. B. `1.1`.
 - Als JSON werden Felder wie `version`, `latest`, `latestVersion` oder `tag_name` erkannt; optional auch `download`, `downloadUrl`, `url`, `html_url`, `changelog`, `notes` oder `body`.
 - Manuell kann der Check in der CFX-Konsole mit `ptv_cityhall_updatecheck` gestartet werden.
+
+## Security
+
+- `Config.Security.Enabled = true` aktiviert serverseitige Anti-Cheat-Pruefungen.
+- Kritische Markt-, Lager-, Buerger-, Wahl- und Stadtkassenaktionen pruefen serverseitig die Entfernung zum Rathaus-/Markthallenpunkt.
+- Der Client kann die aktive Stadt nicht mehr frei setzen, wenn der Spieler nicht in der erlaubten Naehe dieser Stadt ist.
+- Mengen werden serverseitig gegen `minAmount`/`maxAmount` aus der Item-Config geprueft.
+- Aktionen haben serverseitige Cooldowns ueber `Config.Security.RateLimits`.
+- Verdaechtige Aufrufe werden in der CFX-Konsole protokolliert und koennen ueber `Config.Discord.Events.securityViolation` an Discord gesendet werden.
+- Optional kann `Config.Security.DropPlayerAfterViolations = true` Spieler nach zu vielen Verstoessen automatisch kicken.
 
 ## Nutzung
 
@@ -135,6 +145,7 @@ Scrollbar-Farben, Breite und Rundung werden direkt in `html/style.css` ueber die
 - Pro Item kannst du `buyPrice`, `sellPrice` und `initialStock` setzen.
 - Mit `Config.Market.UseConfigPrices = true` werden die `buyPrice`-/`sellPrice`-Werte aus der Config bei jedem Start und Oeffnen auf jede Markthalle uebernommen.
 - Die Markthalle hat einen eigenen Bestand pro Stadt in `bm_market_stock`.
+- Buergermeister/Admins koennen in der Verwaltung fuer jeden einzelnen Artikel und jede einzelne Waffe eigene Einkauf- und Verkaufsteuern setzen.
 - Jede Stadt kann einzelne Waren/Waffen im Verwaltungsfenster per Häkchen aktivieren oder deaktivieren; deaktivierte Gueter werden in der Markthallenansicht ausgeblendet und koennen nicht gekauft, verkauft oder eingestellt werden.
 - Bürgermeister/Admins sehen im Verwaltungsfenster ein Markthallenlager, koennen Bestand kostenlos entnehmen oder Bestand exportieren.
 - Exports, Entnahmen und Aktivieren/Deaktivieren werden im Reiter `Logs` angezeigt und bei aktivem Discord-Webhook gepostet.
@@ -148,9 +159,9 @@ Scrollbar-Farben, Breite und Rundung werden direkt in `html/style.css` ueber die
 - Bürgermeister/Admin koennen aktive Angebote aus der Markthalle entfernen. Die Ware geht direkt oder als Markthallen-Rueckgabe an den Verkaeufer zurueck.
 - Wenn `Config.Market.UseConfigPrices = false` gesetzt ist, koennen nur Admins aus `users.group` Einkaufspreis und Verkaufspreis im separaten `/markthalle_admin` Fenster setzen.
 - Die aktuellen Steuersaetze werden in der Markthalle und im Bürgermeisteramt angezeigt.
-- Die Einkaufsteuer und Verkaufsteuer sind getrennt. Beide muessen mindestens 5% betragen, und die Verkaufsteuer muss mindestens 1 Prozentpunkt hoeher sein als die Einkaufsteuer.
+- Die Einkaufsteuer und Verkaufsteuer sind pro Artikel getrennt. Einkauf muss mindestens 5% betragen, Verkauf mindestens 6%, und die Verkaufsteuer muss mindestens 1 Prozentpunkt hoeher sein als die Einkaufsteuer.
 - Nur Admins aus `users.group` koennen die Steuersaetze im separaten `/markthalle_admin` Fenster oder per `/bm_admin settax [waren_einkauf] [waren_verkauf] [waffen_einkauf] [waffen_verkauf]` setzen.
-- Waren und Waffen haben jeweils einen einheitlichen Einkauf- und Verkaufsteuersatz fuer alle Items im Reiter.
+- Die alten Reiter-Steuern bleiben als Fallback und fuer Admin-Kommandos bestehen; im Markt verwendet die Resource die artikelgenauen Steuersaetze aus `bm_market_stock`.
 - Beim Einstellen wird das Item direkt aus dem Inventar genommen.
 - Beim Einkauf aus der Markthalle zahlt der Kaeufer Einkaufspreis plus Einkaufsteuer.
 - Beim Verkauf an die Markthalle bekommt der Spieler Verkaufspreis abzueglich Verkaufsteuer.

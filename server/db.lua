@@ -199,6 +199,8 @@ local migrations = {
             enabled TINYINT(1) NOT NULL DEFAULT 1,
             buy_price DECIMAL(12,2) NOT NULL DEFAULT 0.00,
             sell_price DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+            buy_tax_rate DECIMAL(5,2) NOT NULL DEFAULT 5.00,
+            sell_tax_rate DECIMAL(5,2) NOT NULL DEFAULT 6.00,
             updated_at INT NOT NULL,
             PRIMARY KEY (id),
             UNIQUE KEY uniq_bm_market_stock_town_item (town_id, item_name),
@@ -311,6 +313,35 @@ function BMDB.ensureMarketStockColumns()
     if not enabledRows[1] then
         MySQL.query.await('ALTER TABLE bm_market_stock ADD COLUMN enabled TINYINT(1) NOT NULL DEFAULT 1 AFTER stock')
         MySQL.update.await('UPDATE bm_market_stock SET enabled = 1 WHERE enabled IS NULL')
+    end
+
+    local buyTaxRows = MySQL.query.await("SHOW COLUMNS FROM bm_market_stock LIKE 'buy_tax_rate'") or {}
+    local sellTaxRows = MySQL.query.await("SHOW COLUMNS FROM bm_market_stock LIKE 'sell_tax_rate'") or {}
+    local addedTaxColumn = false
+    if not buyTaxRows[1] then
+        MySQL.query.await('ALTER TABLE bm_market_stock ADD COLUMN buy_tax_rate DECIMAL(5,2) NULL AFTER sell_price')
+        addedTaxColumn = true
+    end
+    if not sellTaxRows[1] then
+        MySQL.query.await('ALTER TABLE bm_market_stock ADD COLUMN sell_tax_rate DECIMAL(5,2) NULL AFTER buy_tax_rate')
+        addedTaxColumn = true
+    end
+
+    if addedTaxColumn then
+        MySQL.update.await(
+            [[
+                UPDATE bm_market_stock s
+                LEFT JOIN bm_market_taxes t
+                    ON t.town_id = s.town_id
+                    AND t.category = s.category
+                SET
+                    s.buy_tax_rate = COALESCE(t.buy_tax_rate, s.buy_tax_rate, 5.00),
+                    s.sell_tax_rate = COALESCE(t.sell_tax_rate, s.sell_tax_rate, 6.00)
+            ]],
+            {}
+        )
+        MySQL.query.await('ALTER TABLE bm_market_stock MODIFY buy_tax_rate DECIMAL(5,2) NOT NULL DEFAULT 5.00')
+        MySQL.query.await('ALTER TABLE bm_market_stock MODIFY sell_tax_rate DECIMAL(5,2) NOT NULL DEFAULT 6.00')
     end
 end
 

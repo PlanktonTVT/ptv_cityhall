@@ -122,6 +122,8 @@ CREATE TABLE IF NOT EXISTS bm_market_stock (
     enabled TINYINT(1) NOT NULL DEFAULT 1,
     buy_price DECIMAL(12,2) NOT NULL DEFAULT 0.00,
     sell_price DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+    buy_tax_rate DECIMAL(5,2) NOT NULL DEFAULT 5.00,
+    sell_tax_rate DECIMAL(5,2) NOT NULL DEFAULT 6.00,
     updated_at INT NOT NULL,
     PRIMARY KEY (id),
     UNIQUE KEY uniq_bm_market_stock_town_item (town_id, item_name),

@@ -442,6 +442,10 @@ select {
     grid-template-columns: minmax(150px, 0.7fr) minmax(90px, 0.45fr) minmax(100px, 0.5fr) minmax(160px, 0.75fr) auto;
 }
 
+.item-tax-row {
+    grid-template-columns: minmax(240px, 1fr) minmax(120px, 0.35fr) minmax(120px, 0.35fr) auto;
+}
+
 .citizen-row {
     grid-template-columns: minmax(190px, 1fr) minmax(170px, 0.7fr) minmax(190px, 0.85fr) auto;
 }
@@ -521,6 +525,7 @@ textarea {
     .panel-row,
     .form-panel,
     .grant-panel,
+    .item-tax-row,
     .storage-row,
     .citizen-row,
     .tax-editor {

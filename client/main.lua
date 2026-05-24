@@ -194,7 +194,7 @@ local function openMarketWindow()
     end
 
     setActiveTown(activeTownKey)
-    TriggerServerEvent(event('requestMarketWindow'))
+    TriggerServerEvent(event('requestMarketWindow'), activeTownKey)
 end
 
 local function openMarketAdminWindow(initialView)
@@ -263,6 +263,15 @@ end)
 RegisterNUICallback('setTaxes', function(data, cb)
     local result = call('marketSetTaxRates', data.taxes) or { ok = false, message = 'Aktion fehlgeschlagen.' }
     refreshMarketWindow()
+    cb(result)
+end)
+
+RegisterNUICallback('setItemTaxes', function(data, cb)
+    local result = call('marketSetItemTaxRates', data.itemName, data.buyRate, data.sellRate) or { ok = false, message = 'Aktion fehlgeschlagen.' }
+    local refreshed = refreshMarketWindow()
+    if result and result.ok and refreshed and refreshed.ok then
+        result.data = refreshed
+    end
     cb(result)
 end)
 
@@ -783,14 +792,15 @@ function openListingsMenu(categoryKey)
     local elements = {}
     local taxRate = tonumber(data.taxRate) or 0
     for _, listing in ipairs(data.listings or {}) do
+        local listingTaxRate = tonumber(listing.taxSellRate or taxRate) or 0
         local total = (tonumber(listing.amount) or 0) * (tonumber(listing.price_each) or 0)
-        local tax = total * (taxRate / 100)
+        local tax = total * (listingTaxRate / 100)
         elements[#elements + 1] = {
             label = ('%sx %s'):format(listing.amount, listing.item_label),
             value = data.canManage and 'manage_listing' or 'buy',
             listing = listing,
             listingId = listing.id,
-            desc = ('Verkaeufer: %s | Preis/Stk: %s | Gesamt: %s | Steuer %.2f%%: %s'):format(listing.seller_name, money(listing.price_each), money(total), taxRate, money(tax)),
+            desc = ('Verkaeufer: %s | Preis/Stk: %s | Gesamt: %s | Steuer %.2f%%: %s'):format(listing.seller_name, money(listing.price_each), money(total), listingTaxRate, money(tax)),
             descPrice = { amount = total, icon = 'money', text = 'Kaufen' }
         }
     end
@@ -818,7 +828,7 @@ function openListingsMenu(categoryKey)
         elseif data.current.value == 'manage_listing' then
             local listing = data.current.listing
             closeMenu(menu)
-            openListingActionMenu(listing, categoryKey, taxRate)
+            openListingActionMenu(listing, categoryKey, tonumber(listing.taxSellRate or taxRate) or 0)
         elseif data.current.value == 'back' then
             closeMenu(menu)
             openMarketMenu()

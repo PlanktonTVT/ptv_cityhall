@@ -446,6 +446,7 @@ function renderOfficePanel(data) {
     if (state.activeOfficeView === 'management') {
         renderAnnouncementForm();
         renderGrantForm();
+        renderItemTaxEditor(data);
     } else if (state.activeOfficeView === 'citizens') {
         renderCitizenRegistry(office.citizens || []);
     } else if (state.activeOfficeView === 'exports') {
@@ -513,6 +514,47 @@ function renderGrantForm() {
         });
     });
     items.appendChild(row);
+}
+
+function renderItemTaxEditor(data) {
+    items.appendChild(sectionTitle('Artikelsteuern'));
+
+    const stockItems = (data.items || []).slice().sort((a, b) => {
+        const categoryCompare = String(a.categoryLabel || '').localeCompare(String(b.categoryLabel || ''));
+        if (categoryCompare !== 0) return categoryCompare;
+        return String(a.itemLabel || '').localeCompare(String(b.itemLabel || ''));
+    });
+
+    if (stockItems.length === 0) {
+        items.appendChild(emptyRow('Keine Artikel', 'Keine Waren oder Waffen in der Config gefunden.'));
+        return;
+    }
+
+    stockItems.forEach((item) => {
+        const row = document.createElement('article');
+        row.className = 'panel-row item-tax-row';
+        row.innerHTML = `
+            <div>
+                <div class="item-title">${escapeHtml(item.itemLabel)}</div>
+                <span class="item-meta">${escapeHtml(item.categoryLabel)} | Einkauf ${money(item.buyPrice)} | Verkauf ${money(item.sellPrice)}</span>
+            </div>
+            <label>Einkauf %<input data-tax="buy" type="number" min="5" step="0.01" value="${Number(item.taxBuyRate || 5).toFixed(2)}"></label>
+            <label>Verkauf %<input data-tax="sell" type="number" min="6" step="0.01" value="${Number(item.taxSellRate || 6).toFixed(2)}"></label>
+            <button type="button">Setzen</button>
+        `;
+
+        row.querySelector('button').addEventListener('click', () => {
+            const buyInput = row.querySelector('[data-tax="buy"]');
+            const sellInput = row.querySelector('[data-tax="sell"]');
+            runAction('setItemTaxes', {
+                itemName: item.itemName,
+                buyRate: buyInput.value,
+                sellRate: sellInput.value
+            });
+        });
+
+        items.appendChild(row);
+    });
 }
 
 function renderMarketStorage(data) {

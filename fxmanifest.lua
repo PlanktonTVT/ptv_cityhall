@@ -6,7 +6,7 @@ lua54 'yes'
 
 author 'Codex'
 description 'PTV City Hall - VORP mayor, election, treasury, tax, and market hall system'
-version '1.0'
+version '1.1'
 
 shared_scripts {
     'config.lua'

@@ -7,6 +7,8 @@ local characterColumnCache = nil
 local electionReminderSent = {}
 local assignedJobByCharId = {}
 local assignedJobBySource = {}
+local securityCooldowns = {}
+local securityViolations = {}
 
 local function debugLog(message)
     if Config.Debug then
@@ -148,7 +150,7 @@ local function runUpdateChecker(manual)
     if url == '' then
         if manual or checker.PrintIfNoUrl ~= false then
             consoleLog(('Version %s geladen. Updatechecker bereit, aber Config.UpdateChecker.Url ist leer.'):format(currentVersion), '^3')
-            consoleLog('Trage dort eine Raw-URL ein, die z.B. 1.0 oder JSON mit {"version":"1.0"} liefert.', '^3')
+            consoleLog('Trage dort eine Raw-URL ein, die z.B. 1.1 oder JSON mit {"version":"1.1"} liefert.', '^3')
         end
         return
     end
@@ -389,12 +391,220 @@ local function getTown(context)
     return BMDB.getTown(townKey) or BMDB.ensureTownByKey(townKey)
 end
 
+local function securityConfig()
+    return Config.Security or {}
+end
+
+local function securityEnabled()
+    return securityConfig().Enabled ~= false
+end
+
+local function securityRateLimit(action)
+    local limits = securityConfig().RateLimits or {}
+    return tonumber(limits[action] or limits.Default) or 350
+end
+
+local function gameTimeMs()
+    if type(GetGameTimer) == 'function' then
+        return GetGameTimer()
+    end
+
+    return now() * 1000
+end
+
+local function configPosition(coords)
+    if type(coords) ~= 'table' or coords.x == nil or coords.y == nil or coords.z == nil then
+        return nil
+    end
+
+    return {
+        x = tonumber(coords.x),
+        y = tonumber(coords.y),
+        z = tonumber(coords.z)
+    }
+end
+
+local function townHallConfig(townKey)
+    local _, town = BMDB.townConfig(townKey)
+    return (town and town.MarketHall) or (Config.Town and Config.Town.MarketHall) or {}
+end
+
+local function townInteractionPosition(townKey)
+    local hall = townHallConfig(townKey)
+    local ped = hall.Ped or {}
+    return configPosition((ped.enabled and ped.coords) or hall.coords)
+end
+
+local function townInteractionLimit(townKey, forTownSync)
+    local hall = townHallConfig(townKey)
+    if forTownSync then
+        return tonumber(securityConfig().TownSyncDistance) or 20.0
+    end
+
+    local base = tonumber(hall.interactionDistance or hall.radius) or 2.25
+    local grace = tonumber(securityConfig().DistanceGrace) or 3.0
+    return base + grace
+end
+
+local function playerPosition(source)
+    if type(GetPlayerPed) ~= 'function' or type(GetEntityCoords) ~= 'function' then
+        return nil
+    end
+
+    local ped = GetPlayerPed(source)
+    if not ped or ped == 0 then
+        return nil
+    end
+
+    local ok, coords = pcall(GetEntityCoords, ped)
+    if not ok or not coords then
+        return nil
+    end
+
+    return {
+        x = tonumber(coords.x or coords[1]),
+        y = tonumber(coords.y or coords[2]),
+        z = tonumber(coords.z or coords[3])
+    }
+end
+
+local function distanceBetween(a, b)
+    if not a or not b or not a.x or not b.x then
+        return nil
+    end
+
+    local dx = a.x - b.x
+    local dy = a.y - b.y
+    local dz = a.z - b.z
+    return math.sqrt((dx * dx) + (dy * dy) + (dz * dz))
+end
+
+local function securityViolation(source, action, reason, town)
+    if source == 0 or not securityEnabled() then
+        return
+    end
+
+    local cfg = securityConfig()
+    local ts = now()
+    local state = securityViolations[source] or { count = 0, startedAt = ts }
+    if ts - state.startedAt > (tonumber(cfg.ViolationWindowSeconds) or 60) then
+        state = { count = 0, startedAt = ts }
+    end
+
+    state.count = state.count + 1
+    securityViolations[source] = state
+
+    local name = GetPlayerName(source) or ('ID ' .. tostring(source))
+    local townName = town and town.name or 'unbekannt'
+    consoleLog(('Security: %s (%s) | %s | %s | Stadt: %s | Verstoss %s'):format(name, source, action, reason, townName, state.count), '^1')
+
+    if cfg.LogViolationsToDiscord ~= false then
+        sendDiscord('securityViolation', 'Security-Verstoss', ('%s hat einen verdaechtigen ptv_cityhall-Aufruf ausgeloest.'):format(name), {
+            { name = 'Spieler', value = ('%s (%s)'):format(name, source), inline = true },
+            { name = 'Aktion', value = tostring(action), inline = true },
+            { name = 'Stadt', value = townName, inline = true },
+            { name = 'Grund', value = tostring(reason), inline = false },
+            { name = 'Verstoesse', value = tostring(state.count), inline = true }
+        }, 16724736)
+    end
+
+    if cfg.DropPlayerAfterViolations and state.count >= (tonumber(cfg.MaxViolations) or 8) then
+        DropPlayer(source, 'ptv_cityhall Security: zu viele ungueltige Aufrufe.')
+    end
+end
+
+local function rateLimitAction(source, action, town)
+    if source == 0 or not securityEnabled() then
+        return true
+    end
+
+    local cooldown = securityRateLimit(action)
+    if cooldown <= 0 then
+        return true
+    end
+
+    local key = tostring(source) .. ':' .. tostring(action)
+    local current = gameTimeMs()
+    local last = securityCooldowns[key] or 0
+    if current - last < cooldown then
+        securityViolation(source, action, ('Cooldown %sms unterschritten'):format(cooldown), town)
+        return false, 'Bitte warte kurz.'
+    end
+
+    securityCooldowns[key] = current
+    return true
+end
+
+local function playerCanUseTownPoint(source, town, action, forTownSync)
+    if source == 0 or not securityEnabled() or securityConfig().RequireInteractionDistance == false then
+        return true
+    end
+
+    if securityConfig().AdminBypassDistance ~= false and isAdmin(source) then
+        return true
+    end
+
+    local townKey = town and town.key or resolveTownKey(town)
+    local playerCoords = playerPosition(source)
+    local townCoords = townInteractionPosition(townKey)
+    local distance = distanceBetween(playerCoords, townCoords)
+    local limit = townInteractionLimit(townKey, forTownSync)
+
+    if not distance then
+        securityViolation(source, action, 'Position konnte nicht geprueft werden.', town)
+        return false, 'Deine Position konnte nicht geprueft werden.'
+    end
+
+    if distance > limit then
+        securityViolation(source, action, ('Distanz %.2f > %.2f'):format(distance, limit), town)
+        return false, 'Du bist zu weit vom Rathaus oder der Markthalle entfernt.'
+    end
+
+    return true
+end
+
+local function secureAction(source, action, town, options)
+    options = options or {}
+
+    local ok, message = rateLimitAction(source, action, town)
+    if not ok then
+        return false, message
+    end
+
+    if options.requireTown ~= false then
+        ok, message = playerCanUseTownPoint(source, town, action, options.forTownSync)
+        if not ok then
+            return false, message
+        end
+    end
+
+    return true
+end
+
+local function amountInConfiguredRange(amount, configured)
+    if amount < (tonumber(configured.minAmount) or 1) or amount > (tonumber(configured.maxAmount) or Config.Market.MaxAmount or 100) then
+        return false, ('Menge muss zwischen %s und %s liegen.'):format(configured.minAmount, configured.maxAmount)
+    end
+
+    return true
+end
+
 local function setActiveTown(source, townKey)
     if source == 0 then
         return BMDB.defaultTownKey()
     end
 
     local resolved = resolveTownKey(townKey)
+    if activeTownBySource[source] == resolved then
+        return resolved
+    end
+
+    local town = getTown(resolved)
+    local ok = secureAction(source, 'TownSync', town, { forTownSync = true })
+    if not ok then
+        return activeTownBySource[source] or BMDB.defaultTownKey()
+    end
+
     activeTownBySource[source] = resolved
     return resolved
 end
@@ -822,6 +1032,12 @@ AddEventHandler('playerDropped', function()
 
     assignedJobBySource[droppedSource] = nil
     activeTownBySource[droppedSource] = nil
+    securityViolations[droppedSource] = nil
+    for key in pairs(securityCooldowns) do
+        if key:find(tostring(droppedSource) .. ':', 1, true) == 1 then
+            securityCooldowns[key] = nil
+        end
+    end
 end)
 
 local function hasActiveCitizenship(townId, charid)
@@ -921,6 +1137,38 @@ local function useConfigMarketPrices()
     return (Config.Market or {}).UseConfigPrices ~= false
 end
 
+local function minimumBuyTaxRate()
+    return tonumber(Config.Town.MinTaxRate) or 5.0
+end
+
+local function minimumSellTaxRate(buyRate)
+    local spread = tonumber(Config.Town.MinSellTaxSpread) or 1.0
+    return math.max(6.0, minimumBuyTaxRate(), (tonumber(buyRate) or minimumBuyTaxRate()) + spread)
+end
+
+local function fallbackItemTaxRates(categoryKey)
+    local categoryTaxes = Config.Market.CategoryTaxes or {}
+    local configured = categoryTaxes[tostring(categoryKey or '')] or {}
+    local buyRate = tonumber(configured.buyRate) or tonumber(Config.Town.DefaultBuyTaxRate) or minimumBuyTaxRate()
+    local sellRate = tonumber(configured.sellRate) or tonumber(Config.Town.DefaultSellTaxRate) or minimumSellTaxRate(buyRate)
+
+    buyRate = math.max(buyRate, minimumBuyTaxRate())
+    sellRate = math.max(sellRate, minimumSellTaxRate(buyRate))
+    return roundMoney(buyRate), roundMoney(sellRate)
+end
+
+local function normalizeItemTaxRates(buyRate, sellRate, categoryKey)
+    buyRate = tonumber(buyRate)
+    sellRate = tonumber(sellRate)
+    local maxRate = tonumber(Config.Town.MaxTaxRate) or 25.0
+
+    if not buyRate or not sellRate or buyRate < minimumBuyTaxRate() or sellRate < minimumSellTaxRate(buyRate) or buyRate > maxRate or sellRate > maxRate then
+        return fallbackItemTaxRates(categoryKey)
+    end
+
+    return roundMoney(buyRate), roundMoney(sellRate)
+end
+
 local function dbEnabled(value)
     if value == false or value == 0 then
         return false
@@ -958,11 +1206,12 @@ local function syncMarketStock(town)
     end
 
     for _, item in pairs(items) do
+        local buyTaxRate, sellTaxRate = fallbackItemTaxRates(item.category)
         MySQL.insert.await(
             ([[
                 INSERT INTO bm_market_stock
-                    (town_id, category, item_name, item_label, stock, enabled, buy_price, sell_price, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (town_id, category, item_name, item_label, stock, enabled, buy_price, sell_price, buy_tax_rate, sell_tax_rate, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE
                     category = VALUES(category),
                     item_label = VALUES(item_label),
@@ -978,6 +1227,8 @@ local function syncMarketStock(town)
                 1,
                 roundMoney(item.buyPrice),
                 roundMoney(item.sellPrice),
+                buyTaxRate,
+                sellTaxRate,
                 now()
             }
         )
@@ -987,7 +1238,7 @@ end
 local function marketStockRows(townId)
     local rows = MySQL.query.await(
         [[
-            SELECT category, item_name, item_label, stock, enabled, buy_price, sell_price
+            SELECT category, item_name, item_label, stock, enabled, buy_price, sell_price, buy_tax_rate, sell_tax_rate
             FROM bm_market_stock
             WHERE town_id = ?
             ORDER BY category ASC, item_label ASC
@@ -999,6 +1250,7 @@ local function marketStockRows(townId)
     for _, row in ipairs(rows) do
         local configured = marketItemConfig(row.item_name)
         if configured then
+            local buyTaxRate, sellTaxRate = normalizeItemTaxRates(row.buy_tax_rate, row.sell_tax_rate, configured.category)
             normalized[#normalized + 1] = {
                 category = configured.category,
                 categoryLabel = configured.categoryLabel,
@@ -1007,7 +1259,9 @@ local function marketStockRows(townId)
                 stock = tonumber(row.stock) or 0,
                 enabled = dbEnabled(row.enabled),
                 buyPrice = useConfigMarketPrices() and roundMoney(configured.buyPrice) or (tonumber(row.buy_price) or 0),
-                sellPrice = useConfigMarketPrices() and roundMoney(configured.sellPrice) or (tonumber(row.sell_price) or 0)
+                sellPrice = useConfigMarketPrices() and roundMoney(configured.sellPrice) or (tonumber(row.sell_price) or 0),
+                taxBuyRate = buyTaxRate,
+                taxSellRate = sellTaxRate
             }
         end
     end
@@ -1032,6 +1286,20 @@ end
 local function marketItemEnabled(town, itemName)
     local row = stockRowForItem(town, itemName)
     return row and dbEnabled(row.enabled)
+end
+
+local function marketItemTaxRates(town, itemName)
+    local configured = marketItemConfig(itemName)
+    if not configured then
+        return fallbackItemTaxRates('')
+    end
+
+    local row = stockRowForItem(town, itemName)
+    if not row then
+        return fallbackItemTaxRates(configured.category)
+    end
+
+    return normalizeItemTaxRates(row.buy_tax_rate, row.sell_tax_rate, configured.category)
 end
 
 local function marketEnabledMap(town)
@@ -1072,8 +1340,12 @@ local function validateTaxRates(buyRate, sellRate)
     buyRate = roundMoney(buyRate)
     sellRate = roundMoney(sellRate)
 
-    if buyRate < Config.Town.MinTaxRate or sellRate < Config.Town.MinTaxRate then
-        return false, ('Beide Steuersaetze muessen mindestens %.2f%% betragen.'):format(Config.Town.MinTaxRate)
+    if buyRate < minimumBuyTaxRate() then
+        return false, ('Einkaufsteuer muss mindestens %.2f%% betragen.'):format(minimumBuyTaxRate())
+    end
+
+    if sellRate < 6.0 then
+        return false, 'Verkaufsteuer muss mindestens 6.00% betragen.'
     end
 
     if buyRate > Config.Town.MaxTaxRate or sellRate > Config.Town.MaxTaxRate then
@@ -1199,6 +1471,10 @@ local function setAllMarketCategoryTaxes(town, buyRate, sellRate)
             ]],
             { town.id, category.key, category.label, buyRate, sellRate, now() }
         )
+        MySQL.update.await(
+            'UPDATE bm_market_stock SET buy_tax_rate = ?, sell_tax_rate = ?, updated_at = ? WHERE town_id = ? AND category = ?',
+            { buyRate, sellRate, now(), town.id, category.key }
+        )
     end
 end
 
@@ -1232,6 +1508,7 @@ local function ledgerEntryLabel(entryType)
         market_export = 'Lagerbestand exportiert',
         market_withdraw = 'Aus Markthallenlager entnommen',
         market_item_toggle = 'Marktware umgeschaltet',
+        item_tax_change = 'Artikelsteuer geaendert',
         tax_change = 'Steuern geaendert',
         admin_tax_change = 'Admin setzt Steuern',
         citizen_apply = 'Bürgerantrag gestellt',
@@ -1962,11 +2239,6 @@ local function buildMarketWindowData(source, mode)
 
     for _, item in ipairs(items) do
         item.playerCount = safeItemCount(source, item.itemName)
-        local itemTaxes = categoryTaxes[item.category]
-        if itemTaxes then
-            item.taxBuyRate = itemTaxes.buyRate
-            item.taxSellRate = itemTaxes.sellRate
-        end
     end
 
     local adminMode = mode == 'admin'
@@ -2043,6 +2315,12 @@ local function buildMarketWindowData(source, mode)
 end
 
 callback('getMarketWindow', function(source)
+    local town = getTown(source)
+    local ok, message = playerCanUseTownPoint(source, town, 'OpenWindow')
+    if not ok then
+        return { ok = false, message = message }
+    end
+
     return buildMarketWindowData(source, 'market')
 end)
 
@@ -2051,11 +2329,28 @@ callback('getMarketAdminWindow', function(source)
         return { ok = false, message = Config.Text.NoPermission }
     end
 
+    local town = getTown(source)
+    local ok, message = playerCanUseTownPoint(source, town, 'OpenWindow')
+    if not ok then
+        return { ok = false, message = message }
+    end
+
     return buildMarketWindowData(source, 'admin')
 end)
 
-RegisterNetEvent(RESOURCE .. ':server:requestMarketWindow', function()
+RegisterNetEvent(RESOURCE .. ':server:requestMarketWindow', function(townKey)
     local source = source
+    if type(townKey) == 'string' and BMDB.isTownKey(townKey) then
+        setActiveTown(source, townKey)
+    end
+
+    local town = getTown(source)
+    local allowed, message = secureAction(source, 'OpenWindow', town)
+    if not allowed then
+        notify(source, message)
+        return
+    end
+
     local ok, data = pcall(buildMarketWindowData, source, 'market')
     if not ok then
         print(('[%s] Markthallenfenster konnte nicht gebaut werden: %s'):format(RESOURCE, data))
@@ -2084,6 +2379,16 @@ callback('marketBuy', function(source, itemName, amount)
         return { ok = false, message = 'Ware nicht gefunden.' }
     end
 
+    local allowed, message = secureAction(source, 'MarketTrade', town)
+    if not allowed then
+        return { ok = false, message = message }
+    end
+
+    local amountOk, amountMessage = amountInConfiguredRange(amount, configured)
+    if not amountOk then
+        return { ok = false, message = amountMessage }
+    end
+
     syncMarketStock(town)
     local rows = MySQL.query.await(
         'SELECT * FROM bm_market_stock WHERE town_id = ? AND item_name = ? LIMIT 1',
@@ -2109,7 +2414,7 @@ callback('marketBuy', function(source, itemName, amount)
 
     local unitPrice = useConfigMarketPrices() and configured.buyPrice or (tonumber(stock.buy_price) or 0)
     local subtotal = roundMoney(unitPrice * amount)
-    local taxBuyRate = marketCategoryTaxRates(town, configured.category)
+    local taxBuyRate = marketItemTaxRates(town, itemName)
     local tax = roundMoney(subtotal * (taxBuyRate / 100))
     local total = roundMoney(subtotal + tax)
     if not removeMoney(buyer.character, total) then
@@ -2159,6 +2464,16 @@ callback('marketSell', function(source, itemName, amount)
         return { ok = false, message = 'Ware nicht gefunden.' }
     end
 
+    local allowed, message = secureAction(source, 'MarketTrade', town)
+    if not allowed then
+        return { ok = false, message = message }
+    end
+
+    local amountOk, amountMessage = amountInConfiguredRange(amount, configured)
+    if not amountOk then
+        return { ok = false, message = amountMessage }
+    end
+
     syncMarketStock(town)
     local rows = MySQL.query.await(
         'SELECT * FROM bm_market_stock WHERE town_id = ? AND item_name = ? LIMIT 1',
@@ -2192,7 +2507,7 @@ callback('marketSell', function(source, itemName, amount)
 
     local unitPrice = useConfigMarketPrices() and configured.sellPrice or (tonumber(stock.sell_price) or 0)
     local subtotal = roundMoney(unitPrice * amount)
-    local _, taxSellRate = marketCategoryTaxRates(town, configured.category)
+    local _, taxSellRate = marketItemTaxRates(town, itemName)
     local tax = roundMoney(subtotal * (taxSellRate / 100))
     local payout = roundMoney(subtotal - tax)
     if payout > 0 then
@@ -2210,6 +2525,11 @@ callback('marketSetPrice', function(source, itemName, buyPrice, sellPrice)
     local town = getTown(source)
     if not actor or not isAdmin(source) then
         return { ok = false, message = Config.Text.NoPermission }
+    end
+
+    local allowed, message = secureAction(source, 'OfficeAction', town)
+    if not allowed then
+        return { ok = false, message = message }
     end
 
     itemName = trim(itemName)
@@ -2245,6 +2565,11 @@ callback('marketExportStock', function(source, itemName, amount)
         return { ok = false, message = Config.Text.NoPermission }
     end
 
+    local allowed, message = secureAction(source, 'MarketStorage', town)
+    if not allowed then
+        return { ok = false, message = message }
+    end
+
     itemName = trim(itemName)
     amount = math.floor(tonumber(amount) or 0)
     if amount <= 0 then
@@ -2254,6 +2579,11 @@ callback('marketExportStock', function(source, itemName, amount)
     local configured = marketItemConfig(itemName)
     if not configured then
         return { ok = false, message = 'Ware nicht gefunden.' }
+    end
+
+    local amountOk, amountMessage = amountInConfiguredRange(amount, configured)
+    if not amountOk then
+        return { ok = false, message = amountMessage }
     end
 
     local stock = stockRowForItem(town, itemName)
@@ -2303,6 +2633,11 @@ callback('marketWithdrawStock', function(source, itemName, amount)
         return { ok = false, message = Config.Text.NoPermission }
     end
 
+    local allowed, message = secureAction(source, 'MarketStorage', town)
+    if not allowed then
+        return { ok = false, message = message }
+    end
+
     itemName = trim(itemName)
     amount = math.floor(tonumber(amount) or 0)
     if amount <= 0 then
@@ -2312,6 +2647,11 @@ callback('marketWithdrawStock', function(source, itemName, amount)
     local configured = marketItemConfig(itemName)
     if not configured then
         return { ok = false, message = 'Ware nicht gefunden.' }
+    end
+
+    local amountOk, amountMessage = amountInConfiguredRange(amount, configured)
+    if not amountOk then
+        return { ok = false, message = amountMessage }
     end
 
     local stock = stockRowForItem(town, itemName)
@@ -2361,6 +2701,11 @@ callback('marketToggleItem', function(source, itemName, enabled)
         return { ok = false, message = Config.Text.NoPermission }
     end
 
+    local allowed, message = secureAction(source, 'MarketStorage', town)
+    if not allowed then
+        return { ok = false, message = message }
+    end
+
     itemName = trim(itemName)
     local configured = marketItemConfig(itemName)
     if not configured then
@@ -2393,6 +2738,11 @@ callback('marketSetTaxRates', function(source, taxes, legacySellRate)
     local town = getTown(source)
     if not actor or not isAdmin(source) then
         return { ok = false, message = Config.Text.NoPermission }
+    end
+
+    local allowed, message = secureAction(source, 'OfficeAction', town)
+    if not allowed then
+        return { ok = false, message = message }
     end
 
     local _, categories = marketCatalog()
@@ -2449,6 +2799,10 @@ callback('marketSetTaxRates', function(source, taxes, legacySellRate)
             ]],
             { town.id, update.category, update.label, update.buyRate, update.sellRate, now() }
         )
+        MySQL.update.await(
+            'UPDATE bm_market_stock SET buy_tax_rate = ?, sell_tax_rate = ?, updated_at = ? WHERE town_id = ? AND category = ?',
+            { update.buyRate, update.sellRate, now(), town.id, update.category }
+        )
     end
 
     local primary = updates[1]
@@ -2473,12 +2827,62 @@ callback('marketSetTaxRates', function(source, taxes, legacySellRate)
     return { ok = true, message = ('Steuern gesetzt: %s.'):format(note) }
 end)
 
+callback('marketSetItemTaxRates', function(source, itemName, buyRate, sellRate)
+    local actor = characterInfo(source)
+    local town = getTown(source)
+    if not actor or not canUseOffice(source, town) then
+        return { ok = false, message = Config.Text.NoPermission }
+    end
+
+    local allowed, message = secureAction(source, 'OfficeAction', town)
+    if not allowed then
+        return { ok = false, message = message }
+    end
+
+    itemName = trim(itemName)
+    local configured = marketItemConfig(itemName)
+    if not configured then
+        return { ok = false, message = 'Ware nicht gefunden.' }
+    end
+
+    local ok, validationMessage, normalizedBuy, normalizedSell = validateTaxRates(buyRate, sellRate)
+    if not ok then
+        return { ok = false, message = validationMessage }
+    end
+
+    syncMarketStock(town)
+    local updated = MySQL.update.await(
+        'UPDATE bm_market_stock SET buy_tax_rate = ?, sell_tax_rate = ?, updated_at = ? WHERE town_id = ? AND item_name = ?',
+        { normalizedBuy, normalizedSell, now(), town.id, itemName }
+    )
+    if (tonumber(updated) or 0) < 1 then
+        return { ok = false, message = 'Ware nicht gefunden.' }
+    end
+
+    local note = ('%s: Einkauf %.2f%%, Verkauf %.2f%%.'):format(configured.label, normalizedBuy, normalizedSell)
+    addLedger(town.id, 'item_tax_change', 0, actor, note)
+    sendDiscord('taxChange', 'Artikelsteuer geaendert', ('%s hat in %s die Artikelsteuer geaendert.'):format(actor.name, town.name), {
+        { name = 'Stadt', value = town.name, inline = true },
+        { name = 'Artikel', value = configured.label, inline = true },
+        { name = 'Einkauf', value = ('%.2f%%'):format(normalizedBuy), inline = true },
+        { name = 'Verkauf', value = ('%.2f%%'):format(normalizedSell), inline = true },
+        { name = 'Akteur', value = actor.name, inline = true }
+    })
+
+    return { ok = true, message = ('Steuern gesetzt fuer %s: E %.2f%% / V %.2f%%.'):format(configured.label, normalizedBuy, normalizedSell) }
+end)
+
 callback('getInventoryItems', function(source, categoryKey)
     if categoryKey and categoryKey ~= '' and not marketCategory(categoryKey) then
         return { ok = false, message = 'Unbekannter Markthallen-Reiter.' }
     end
 
     local town = getTown(source)
+    local allowed, message = playerCanUseTownPoint(source, town, 'OpenWindow')
+    if not allowed then
+        return { ok = false, message = message }
+    end
+
     local enabledMap = marketEnabledMap(town)
     local items = awaitVorpInventory(function(done)
         exports.vorp_inventory:getUserInventoryItems(source, done)
@@ -2515,6 +2919,11 @@ callback('getListings', function(source, categoryKey)
     end
 
     local town = getTown(source)
+    local allowed, message = playerCanUseTownPoint(source, town, 'OpenWindow')
+    if not allowed then
+        return { ok = false, message = message }
+    end
+
     local enabledMap = marketEnabledMap(town)
     local rows = MySQL.query.await(
         [[
@@ -2531,10 +2940,13 @@ callback('getListings', function(source, categoryKey)
     for _, row in ipairs(rows) do
         local configured = marketItemConfig(row.item_name, categoryKey)
         if configured and enabledMap[tostring(row.item_name)] ~= false then
+            local buyRate, sellRate = marketItemTaxRates(town, row.item_name)
             row.price_each = tonumber(row.price_each) or 0
             row.item_label = configured.label or row.item_label
             row.category = configured.category
             row.categoryLabel = configured.categoryLabel
+            row.taxBuyRate = buyRate
+            row.taxSellRate = sellRate
             filtered[#filtered + 1] = row
             if #filtered >= Config.Market.MaxActiveListings then
                 break
@@ -2563,6 +2975,11 @@ callback('getMyListings', function(source)
     end
 
     local town = getTown(source)
+    local allowed, message = playerCanUseTownPoint(source, town, 'OpenWindow')
+    if not allowed then
+        return { ok = false, message = message }
+    end
+
     local rows = MySQL.query.await(
         [[
             SELECT id, item_name, item_label, amount, price_each, created_at
@@ -2590,6 +3007,11 @@ callback('getLedger', function(source)
         return { ok = false, message = Config.Text.NoPermission }
     end
 
+    local allowed, message = playerCanUseTownPoint(source, town, 'OfficeAction')
+    if not allowed then
+        return { ok = false, message = message }
+    end
+
     local rows = MySQL.query.await(
         [[
             SELECT entry_type, amount, actor_name, note, created_at
@@ -2610,6 +3032,11 @@ callback('getCitizenRegistry', function(source)
         return { ok = false, message = Config.Text.NoPermission }
     end
 
+    local allowed, message = playerCanUseTownPoint(source, town, 'OfficeAction')
+    if not allowed then
+        return { ok = false, message = message }
+    end
+
     return {
         ok = true,
         counts = BMDB.citizenCounts(town.id),
@@ -2626,6 +3053,12 @@ RegisterNetEvent(RESOURCE .. ':server:applyCitizenship', function()
     end
 
     local town = getTown(source)
+    local allowed, message = secureAction(source, 'OfficeAction', town)
+    if not allowed then
+        notify(source, message)
+        return
+    end
+
     local citizenship = BMDB.citizenship(town.id, info.charid)
     if citizenship and citizenship.status == 'active' then
         notify(source, ('Du bist bereits bestaetigter Bürger von %s.'):format(town.name))
@@ -2683,6 +3116,12 @@ RegisterNetEvent(RESOURCE .. ':server:approveCitizen', function(citizenId)
         return
     end
 
+    local allowed, message = secureAction(source, 'OfficeAction', town)
+    if not allowed then
+        notify(source, message)
+        return
+    end
+
     citizenId = tonumber(citizenId)
     if not citizenId then
         notify(source, 'Ungueltiger Bürger-Eintrag.')
@@ -2734,6 +3173,12 @@ RegisterNetEvent(RESOURCE .. ':server:removeCitizen', function(citizenId, reason
     local town = getTown(source)
     if not actor or not canUseOffice(source, town) then
         notify(source, Config.Text.NoPermission)
+        return
+    end
+
+    local allowed, message = secureAction(source, 'OfficeAction', town)
+    if not allowed then
+        notify(source, message)
         return
     end
 
@@ -2799,6 +3244,12 @@ RegisterNetEvent(RESOURCE .. ':server:assignCitizenJob', function(citizenId, job
     local town = getTown(source)
     if not actor or not canUseOffice(source, town) then
         notify(source, Config.Text.NoPermission)
+        return
+    end
+
+    local allowed, message = secureAction(source, 'OfficeAction', town)
+    if not allowed then
+        notify(source, message)
         return
     end
 
@@ -2871,6 +3322,12 @@ RegisterNetEvent(RESOURCE .. ':server:registerCandidate', function(manifesto)
     end
 
     local town = getTown(source)
+    local allowed, message = secureAction(source, 'ElectionAction', town)
+    if not allowed then
+        notify(source, message)
+        return
+    end
+
     local election = BMDB.activeElection(town.id)
     if not election then
         notify(source, 'Es laeuft keine Wahl.')
@@ -2915,6 +3372,12 @@ RegisterNetEvent(RESOURCE .. ':server:castVote', function(candidateId)
     end
 
     local town = getTown(source)
+    local allowed, message = secureAction(source, 'ElectionAction', town)
+    if not allowed then
+        notify(source, message)
+        return
+    end
+
     local election = BMDB.activeElection(town.id)
     if not election then
         notify(source, 'Es laeuft keine Wahl.')
@@ -2988,6 +3451,12 @@ RegisterNetEvent(RESOURCE .. ':server:createListing', function(itemName, amount,
     end
 
     local town = getTown(source)
+    local allowed, message = secureAction(source, 'ListingAction', town)
+    if not allowed then
+        notify(source, message)
+        return
+    end
+
     if not marketItemEnabled(town, itemName) then
         notify(source, 'Diese Ware ist in dieser Stadt aktuell deaktiviert.')
         return
@@ -3070,6 +3539,12 @@ RegisterNetEvent(RESOURCE .. ':server:buyListing', function(listingId)
     end
 
     local town = getTown(source)
+    local allowed, message = secureAction(source, 'ListingAction', town)
+    if not allowed then
+        notify(source, message)
+        return
+    end
+
     local listingRows = MySQL.query.await(
         'SELECT * FROM bm_market_listings WHERE id = ? AND town_id = ? AND status = ? LIMIT 1',
         { listingId, town.id, 'active' }
@@ -3108,7 +3583,7 @@ RegisterNetEvent(RESOURCE .. ':server:buyListing', function(listingId)
     local amount = tonumber(listing.amount) or 0
     local priceEach = tonumber(listing.price_each) or 0
     local total = roundMoney(amount * priceEach)
-    local _, taxSellRate = marketCategoryTaxRates(town, configured.category)
+    local _, taxSellRate = marketItemTaxRates(town, listing.item_name)
     local tax = roundMoney(total * (taxSellRate / 100))
     local sellerPayout = roundMoney(total - tax)
 
@@ -3168,6 +3643,12 @@ RegisterNetEvent(RESOURCE .. ':server:cancelListing', function(listingId)
     end
 
     local town = getTown(source)
+    local allowed, message = secureAction(source, 'ListingAction', town)
+    if not allowed then
+        notify(source, message)
+        return
+    end
+
     local rows = MySQL.query.await(
         'SELECT * FROM bm_market_listings WHERE id = ? AND town_id = ? AND status = ? LIMIT 1',
         { listingId, town.id, 'active' }
@@ -3217,6 +3698,12 @@ RegisterNetEvent(RESOURCE .. ':server:removeListingFromMarket', function(listing
     local town = getTown(source)
     if not actor or not canUseOffice(source, town) or not Config.Market.MayorCanRemoveListings then
         notify(source, Config.Text.NoPermission)
+        return
+    end
+
+    local allowed, message = secureAction(source, 'ListingAction', town)
+    if not allowed then
+        notify(source, message)
         return
     end
 
@@ -3295,6 +3782,12 @@ RegisterNetEvent(RESOURCE .. ':server:updateListingPrice', function(listingId, p
         return
     end
 
+    local allowed, message = secureAction(source, 'ListingAction', town)
+    if not allowed then
+        notify(source, message)
+        return
+    end
+
     listingId = tonumber(listingId)
     priceEach = roundMoney(priceEach)
     if not listingId then
@@ -3345,6 +3838,13 @@ RegisterNetEvent(RESOURCE .. ':server:claimPayouts', function()
         return
     end
 
+    local town = getTown(source)
+    local allowed, message = secureAction(source, 'PayoutAction', town)
+    if not allowed then
+        notify(source, message)
+        return
+    end
+
     local total = claimPayoutsForChar(info.charid)
     if total > 0 then
         notify(source, ('Auszahlung erhalten: %s.'):format(money(total)))
@@ -3361,6 +3861,13 @@ RegisterNetEvent(RESOURCE .. ':server:claimItemReturns', function()
         return
     end
 
+    local town = getTown(source)
+    local allowed, message = secureAction(source, 'PayoutAction', town)
+    if not allowed then
+        notify(source, message)
+        return
+    end
+
     local claimed, message = claimItemReturnsForSource(source, info.charid)
     notify(source, message)
 end)
@@ -3371,6 +3878,12 @@ RegisterNetEvent(RESOURCE .. ':server:setTaxRate', function(rate)
     local town = getTown(source)
     if not info or not canUseOffice(source, town) then
         notify(source, Config.Text.NoPermission)
+        return
+    end
+
+    local allowed, message = secureAction(source, 'OfficeAction', town)
+    if not allowed then
+        notify(source, message)
         return
     end
 
@@ -3405,6 +3918,12 @@ RegisterNetEvent(RESOURCE .. ':server:mayorAnnouncement', function(message)
         return
     end
 
+    local allowed, message = secureAction(source, 'OfficeAction', town)
+    if not allowed then
+        notify(source, message)
+        return
+    end
+
     message = trim(message)
     if #message < 3 or #message > 180 then
         notify(source, 'Bekanntmachung muss 3 bis 180 Zeichen haben.')
@@ -3421,6 +3940,12 @@ RegisterNetEvent(RESOURCE .. ':server:treasuryGrant', function(targetId, amount,
     local town = getTown(source)
     if not actor or not canUseOffice(source, town) then
         notify(source, Config.Text.NoPermission)
+        return
+    end
+
+    local allowed, message = secureAction(source, 'OfficeAction', town)
+    if not allowed then
+        notify(source, message)
         return
     end
 
@@ -3512,6 +4037,13 @@ RegisterNetEvent(RESOURCE .. ':server:startElectionFromHall', function(nominatio
         return
     end
 
+    local town = getTown(source)
+    local allowed, message = secureAction(source, 'ElectionAction', town)
+    if not allowed then
+        notify(source, message)
+        return
+    end
+
     startElection(source, nominationHours, votingHours)
 end)
 
@@ -3523,6 +4055,12 @@ RegisterNetEvent(RESOURCE .. ':server:endElectionFromHall', function()
     end
 
     local town = getTown(source)
+    local allowed, message = secureAction(source, 'ElectionAction', town)
+    if not allowed then
+        notify(source, message)
+        return
+    end
+
     local election = BMDB.activeElection(town.id)
     if not election then
         notify(source, 'Keine aktive Wahl.')
@@ -3623,6 +4161,10 @@ RegisterCommand(Config.Commands.Admin, function(source, args)
                             updated_at = VALUES(updated_at)
                     ]],
                     { town.id, update.category, update.label, update.buyRate, update.sellRate, now() }
+                )
+                MySQL.update.await(
+                    'UPDATE bm_market_stock SET buy_tax_rate = ?, sell_tax_rate = ?, updated_at = ? WHERE town_id = ? AND category = ?',
+                    { update.buyRate, update.sellRate, now(), town.id, update.category }
                 )
             end
         end

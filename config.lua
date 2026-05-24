@@ -2,7 +2,7 @@ Config = {}
 
 Config.Debug = false -- true zeigt Debug-Ausgaben in der Server-Konsole, false macht das Script ruhiger.
 Config.AutoSetupDatabase = true -- true legt/aktualisiert die Datenbanktabellen beim Resource-Start automatisch.
-Config.Version = '1.0' -- Aktuelle Script-Version; wird auch vom Updatechecker angezeigt.
+Config.Version = '1.1' -- Aktuelle Script-Version; wird auch vom Updatechecker angezeigt.
 
 Config.UpdateChecker = {
     Enabled = true, -- true prueft beim Resource-Start und per CFX-Konsolencommand auf Updates.
@@ -27,6 +27,29 @@ Config.Commands = {
 
 Config.Keys = {
     Interact = 0x760A9C6F -- Taste G zum Oeffnen am Rathaus-/Markthallen-NPC.
+}
+
+Config.Security = {
+    Enabled = true, -- true aktiviert serverseitige Anti-Cheat-Pruefungen.
+    RequireInteractionDistance = true, -- true erlaubt Markt-/Rathausaktionen nur in der Naehe des Stadtpunktes.
+    DistanceGrace = 3.0, -- Zusatzreichweite zur interactionDistance, damit Sync/Latenz nicht zu streng ist.
+    TownSyncDistance = 20.0, -- Maximale Entfernung, in der ein Client seine aktive Stadt setzen darf.
+    AdminBypassDistance = true, -- true erlaubt Admins Verwaltungsaktionen auch ausserhalb des Rathauspunktes.
+    LogViolationsToDiscord = true, -- true sendet verdaechtige Aufrufe als Discord-Webhook, wenn Discord aktiv ist.
+    DropPlayerAfterViolations = false, -- true kickt Spieler nach zu vielen Verstoessen automatisch.
+    MaxViolations = 8, -- Anzahl Verstoesse im Zeitfenster, bevor optional gekickt wird.
+    ViolationWindowSeconds = 60, -- Zeitfenster fuer MaxViolations.
+    RateLimits = {
+        Default = 350, -- Standard-Cooldown in Millisekunden fuer gesicherte Aktionen.
+        TownSync = 1000, -- Cooldown fuer das Setzen der aktiven Stadt.
+        OpenWindow = 1000, -- Cooldown fuer das Oeffnen der Markthalle.
+        MarketTrade = 750, -- Cooldown fuer Einkauf/Verkauf.
+        MarketStorage = 750, -- Cooldown fuer Lager-Export, Entnahme und Aktivieren/Deaktivieren.
+        OfficeAction = 1000, -- Cooldown fuer Buergerverwaltung, Jobvergabe, Stadtkasse und Bekanntmachung.
+        ElectionAction = 1000, -- Cooldown fuer Kandidatur, Abstimmung und Wahlverwaltung.
+        ListingAction = 1000, -- Cooldown fuer alte Spielerangebots-Funktionen.
+        PayoutAction = 1500 -- Cooldown fuer Auszahlungen und Warenrueckgaben.
+    }
 }
 
 Config.DefaultTown = 'blackwater' -- Fallback-Stadt, wenn kein Stadtpunkt erkannt wurde oder die Konsole einen Command nutzt.
@@ -399,7 +422,8 @@ Config.Discord = {
         treasuryGrant = true, -- Meldung, wenn Geld aus der Stadtkasse ausgezahlt wird.
         marketExport = true, -- Meldung, wenn Lagerbestand exportiert und der Stadtkasse gutgeschrieben wird.
         marketWithdraw = true, -- Meldung, wenn Bürgermeister/Admins Waren oder Waffen aus dem Lager entnehmen.
-        marketToggle = true -- Meldung, wenn Waren oder Waffen fuer eine Stadt aktiviert/deaktiviert werden.
+        marketToggle = true, -- Meldung, wenn Waren oder Waffen fuer eine Stadt aktiviert/deaktiviert werden.
+        securityViolation = true -- Meldung, wenn ein verdaechtiger oder zu schneller Serveraufruf erkannt wird.
     }
 }
 
