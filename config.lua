@@ -2,7 +2,7 @@ Config = {}
 
 Config.Debug = false -- true zeigt Debug-Ausgaben in der Server-Konsole, false macht das Script ruhiger.
 Config.AutoSetupDatabase = true -- true legt/aktualisiert die Datenbanktabellen beim Resource-Start automatisch.
-Config.Version = '1.1' -- Aktuelle Script-Version; wird auch vom Updatechecker angezeigt.
+Config.Version = '1.2' -- Aktuelle Script-Version; wird auch vom Updatechecker angezeigt.
 
 Config.UpdateChecker = {
     Enabled = true, -- true prueft beim Resource-Start und per CFX-Konsolencommand auf Updates.
@@ -395,6 +395,7 @@ Config.Citizenship = {
     RequireApprovedForVoting = false, -- true erlaubt nur bestaetigten Bürgern das Abstimmen.
     RequireApprovedForCandidacy = false, -- true erlaubt nur bestaetigten Bürgern die Kandidatur.
     AllowReapplyAfterRemoval = true, -- true erlaubt erneute Bürgerantraege nach Entfernung.
+    ApplyCooldownDays = 14, -- Tage, die ein Charakter nach einem Bürgerantrag warten muss, bevor er in einer anderen/erneuten Stadt einen neuen Antrag stellen kann. 0 deaktiviert den Cooldown.
     MaxRegistryRows = 150 -- Maximale Anzahl sichtbarer Eintraege im Bürgerregister.
 }
 

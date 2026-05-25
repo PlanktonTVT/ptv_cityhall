@@ -390,6 +390,12 @@ local function secondsText(seconds)
         return 'jetzt'
     end
 
+    local days = math.floor(seconds / 86400)
+    if days > 0 then
+        local hours = math.floor((seconds % 86400) / 3600)
+        return ('%sd %sh'):format(days, hours)
+    end
+
     local hours = math.floor(seconds / 3600)
     local minutes = math.floor((seconds % 3600) / 60)
     if hours > 0 then
@@ -498,7 +504,14 @@ local function openMainMenu()
         { label = 'Markthalle', value = 'market', desc = 'Waren einstellen, kaufen und eigene Angebote verwalten.' }
     }
 
-    if player.citizenship ~= 'active' and player.citizenship ~= 'pending' then
+    local citizenCooldown = tonumber(player.citizenshipCooldownRemaining) or 0
+    if player.citizenship ~= 'active' and player.citizenship ~= 'pending' and citizenCooldown > 0 then
+        elements[#elements + 1] = {
+            label = 'Buerger-Cooldown',
+            value = 'noop',
+            desc = ('Naechster Buergerantrag moeglich in %s.'):format(secondsText(citizenCooldown))
+        }
+    elseif player.citizenship ~= 'active' and player.citizenship ~= 'pending' then
         elements[#elements + 1] = {
             label = 'Als Bürger eintragen',
             value = 'citizen_apply',

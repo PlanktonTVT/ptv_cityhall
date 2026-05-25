@@ -5,6 +5,7 @@ const state = {
     activeView: 'market',
     activeCategory: null,
     activeOfficeView: 'management',
+    activeItemTaxCategory: null,
     data: null
 };
 
@@ -38,6 +39,12 @@ function escapeHtml(value) {
 function secondsText(seconds) {
     seconds = Number(seconds || 0);
     if (seconds <= 0) return 'jetzt';
+
+    const days = Math.floor(seconds / 86400);
+    if (days > 0) {
+        const hours = Math.floor((seconds % 86400) / 3600);
+        return `${days}d ${hours}h`;
+    }
 
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
@@ -148,6 +155,11 @@ function setData(data) {
     const categoryExists = (data.categories || []).some((category) => category.key === state.activeCategory);
     if (!categoryExists) {
         state.activeCategory = firstCategory;
+    }
+
+    const itemTaxCategoryExists = (data.categories || []).some((category) => category.key === state.activeItemTaxCategory);
+    if (!itemTaxCategoryExists) {
+        state.activeItemTaxCategory = firstCategory;
     }
 
     const viewExists = availableViews(data).some((view) => view.key === state.activeView);
@@ -322,7 +334,13 @@ function renderCitizenPanel(data) {
         `Du bist aktuell: ${citizenshipText(player.citizenship)}. Bestaetigte Bürger: ${counts.active || 0}, offene Antraege: ${counts.pending || 0}.`
     ));
 
-    if (player.citizenship !== 'active' && player.citizenship !== 'pending') {
+    const citizenCooldown = Number(player.citizenshipCooldownRemaining || 0);
+    if (player.citizenship !== 'active' && player.citizenship !== 'pending' && citizenCooldown > 0) {
+        items.appendChild(panelRow(
+            'Buerger-Cooldown',
+            `Naechster Buergerantrag moeglich in ${secondsText(citizenCooldown)}.`
+        ));
+    } else if (player.citizenship !== 'active' && player.citizenship !== 'pending') {
         items.appendChild(panelRow(
             'Eintragung beantragen',
             `Bürgerschaft fuer ${data.town.name} einreichen.`,
@@ -519,18 +537,51 @@ function renderGrantForm() {
 function renderItemTaxEditor(data) {
     items.appendChild(sectionTitle('Artikelsteuern'));
 
-    const stockItems = (data.items || []).slice().sort((a, b) => {
-        const categoryCompare = String(a.categoryLabel || '').localeCompare(String(b.categoryLabel || ''));
-        if (categoryCompare !== 0) return categoryCompare;
-        return String(a.itemLabel || '').localeCompare(String(b.itemLabel || ''));
-    });
+    const stockItems = (data.items || []).slice();
 
     if (stockItems.length === 0) {
         items.appendChild(emptyRow('Keine Artikel', 'Keine Waren oder Waffen in der Config gefunden.'));
         return;
     }
 
-    stockItems.forEach((item) => {
+    const categories = (data.categories || []).filter((category) => {
+        return stockItems.some((item) => item.category === category.key);
+    });
+
+    if (categories.length === 0) {
+        items.appendChild(emptyRow('Keine Reiter', 'Keine Waren- oder Waffenreiter in der Config gefunden.'));
+        return;
+    }
+
+    if (!categories.some((category) => category.key === state.activeItemTaxCategory)) {
+        state.activeItemTaxCategory = categories[0].key;
+    }
+
+    const nav = document.createElement('nav');
+    nav.className = 'item-tax-tabs';
+    categories.forEach((category) => {
+        const button = document.createElement('button');
+        button.className = `tab${category.key === state.activeItemTaxCategory ? ' active' : ''}`;
+        button.type = 'button';
+        button.textContent = category.label;
+        button.addEventListener('click', () => {
+            state.activeItemTaxCategory = category.key;
+            render();
+        });
+        nav.appendChild(button);
+    });
+    items.appendChild(nav);
+
+    const visibleItems = stockItems
+        .filter((item) => item.category === state.activeItemTaxCategory)
+        .sort((a, b) => String(a.itemLabel || '').localeCompare(String(b.itemLabel || '')));
+
+    if (visibleItems.length === 0) {
+        items.appendChild(emptyRow('Keine Artikel', 'In diesem Reiter sind keine Artikel vorhanden.'));
+        return;
+    }
+
+    visibleItems.forEach((item) => {
         const row = document.createElement('article');
         row.className = 'panel-row item-tax-row';
         row.innerHTML = `

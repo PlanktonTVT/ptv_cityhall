@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS bm_citizens (
     PRIMARY KEY (id),
     UNIQUE KEY uniq_bm_citizen_town_char (town_id, charid),
     KEY idx_bm_citizens_town_status (town_id, status),
+    KEY idx_bm_citizens_char_created (charid, created_at),
     CONSTRAINT fk_bm_citizens_town
         FOREIGN KEY (town_id) REFERENCES bm_towns(id)
         ON DELETE CASCADE

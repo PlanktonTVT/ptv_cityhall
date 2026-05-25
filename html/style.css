@@ -340,7 +340,8 @@ select {
 
 .main-tabs,
 .tabs,
-.office-tabs {
+.office-tabs,
+.item-tax-tabs {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
@@ -361,6 +362,14 @@ select {
     border: 1px solid rgba(255, 223, 83, 0.32);
     border-radius: 4px;
     background: rgba(0, 0, 0, 0.45);
+}
+
+.item-tax-tabs {
+    margin: 0 0 10px;
+    padding: 10px;
+    border: 1px solid rgba(255, 223, 83, 0.32);
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.36);
 }
 
 .tab {

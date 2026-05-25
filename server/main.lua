@@ -35,6 +35,12 @@ local function secondsText(seconds)
         return 'jetzt'
     end
 
+    local days = math.floor(seconds / 86400)
+    if days > 0 then
+        local hours = math.floor((seconds % 86400) / 3600)
+        return ('%sd %sh'):format(days, hours)
+    end
+
     local hours = math.floor(seconds / 3600)
     local minutes = math.floor((seconds % 3600) / 60)
     if hours > 0 then
@@ -150,7 +156,7 @@ local function runUpdateChecker(manual)
     if url == '' then
         if manual or checker.PrintIfNoUrl ~= false then
             consoleLog(('Version %s geladen. Updatechecker bereit, aber Config.UpdateChecker.Url ist leer.'):format(currentVersion), '^3')
-            consoleLog('Trage dort eine Raw-URL ein, die z.B. 1.1 oder JSON mit {"version":"1.1"} liefert.', '^3')
+            consoleLog('Trage dort eine Raw-URL ein, die z.B. 1.2 oder JSON mit {"version":"1.2"} liefert.', '^3')
         end
         return
     end
@@ -1043,6 +1049,35 @@ end)
 local function hasActiveCitizenship(townId, charid)
     local citizenship = BMDB.citizenship(townId, charid)
     return citizenship and citizenship.status == 'active'
+end
+
+local function citizenshipApplyCooldownDays()
+    local days = tonumber((Config.Citizenship or {}).ApplyCooldownDays) or 0
+    if days < 0 then
+        return 0
+    end
+
+    return days
+end
+
+local function citizenshipApplyCooldown(charid)
+    local days = citizenshipApplyCooldownDays()
+    if days <= 0 then
+        return 0, nil
+    end
+
+    local latest = BMDB.latestCitizenshipByChar(charid)
+    if not latest then
+        return 0, nil
+    end
+
+    local lastApplyAt = tonumber(latest.created_at) or tonumber(latest.updated_at) or 0
+    local remaining = (lastApplyAt + math.floor(days * 86400)) - now()
+    if remaining <= 0 then
+        return 0, latest
+    end
+
+    return remaining, latest
 end
 
 local function marketCatalog()
@@ -2062,6 +2097,10 @@ callback('getDashboard', function(source)
     local pending = info and BMDB.pendingPayoutTotal(info.charid) or 0
     local pendingItems = info and BMDB.pendingItemReturnCount(info.charid) or 0
     local citizenship = info and BMDB.citizenship(town.id, info.charid) or nil
+    local citizenshipCooldownRemaining = 0
+    if info then
+        citizenshipCooldownRemaining = select(1, citizenshipApplyCooldown(info.charid))
+    end
     local citizenCounts = BMDB.citizenCounts(town.id)
     local taxBuyRate, taxSellRate = townTaxRates(town)
     local categoryTaxes = marketCategoryTaxMap(town)
@@ -2093,7 +2132,8 @@ callback('getDashboard', function(source)
             canUseOffice = canUseOffice(source, town),
             pendingPayout = pending,
             pendingItemReturns = pendingItems,
-            citizenship = citizenship and citizenship.status or nil
+            citizenship = citizenship and citizenship.status or nil,
+            citizenshipCooldownRemaining = citizenshipCooldownRemaining
         }
     }
 end)
@@ -2247,6 +2287,10 @@ local function buildMarketWindowData(source, mode)
     local admin = isAdmin(source)
     local officeAccess = canUseOffice(source, town)
     local citizenship = info and BMDB.citizenship(town.id, info.charid) or nil
+    local citizenshipCooldownRemaining = 0
+    if info then
+        citizenshipCooldownRemaining = select(1, citizenshipApplyCooldown(info.charid))
+    end
     local citizenCounts = BMDB.citizenCounts(town.id)
     local pending = info and BMDB.pendingPayoutTotal(info.charid) or 0
     local pendingItems = info and BMDB.pendingItemReturnCount(info.charid) or 0
@@ -2309,7 +2353,8 @@ local function buildMarketWindowData(source, mode)
             canUseOffice = officeAccess,
             pendingPayout = pending,
             pendingItemReturns = pendingItems,
-            citizenship = citizenship and citizenship.status or nil
+            citizenship = citizenship and citizenship.status or nil,
+            citizenshipCooldownRemaining = citizenshipCooldownRemaining
         }
     }
 end
@@ -3072,6 +3117,13 @@ RegisterNetEvent(RESOURCE .. ':server:applyCitizenship', function()
 
     if citizenship and citizenship.status == 'removed' and not Config.Citizenship.AllowReapplyAfterRemoval then
         notify(source, 'Du kannst dich aktuell nicht erneut als Bürger eintragen.')
+        return
+    end
+
+    local cooldownRemaining, latestCitizenship = citizenshipApplyCooldown(info.charid)
+    if cooldownRemaining > 0 then
+        local lastTown = latestCitizenship and (latestCitizenship.town_name or latestCitizenship.town_id) or 'einer Stadt'
+        notify(source, ('Du kannst erst in %s wieder einen Buergerantrag stellen. Letzter Antrag: %s.'):format(secondsText(cooldownRemaining), tostring(lastTown)))
         return
     end
 

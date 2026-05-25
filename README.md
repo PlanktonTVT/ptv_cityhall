@@ -8,6 +8,7 @@ VORP/RedM Resource fuer ein Bürgermeistersystem mit Rathaeusern und Markthallen
 - Neun vorkonfigurierte Staedte mit eigenem Rathauspunkt, NPC, besonderem Rathaus-Blip, eigener Wahl, eigenem Bürgermeister und eigener Stadtkasse.
 - Bürgerregister mit Antraegen, Bestaetigung durch Bürgermeister/Admin und Austragung aus der Stadt.
 - Ingame-Wahlen mit Kandidaturphase, Abstimmphase, Einmal-Stimme pro Charakter und automatischem Wahlsieger.
+- Konfigurierbarer Buergerantrags-Cooldown verhindert schnelle Mehrfachanmeldungen in mehreren Staedten.
 - Zentrale Markthalle mit konfigurierbaren Reitern fuer Waren und Waffen, NPC und ruhigem Interaktionsfeld.
 - Item-Escrow: Ware wird beim Einstellen aus dem Inventar genommen und beim Kauf an den Kaeufer gegeben.
 - Steuereinnahmen aus Markthallenverkaeufen und Einstellgebuehren fliessen in die Stadtkasse.
@@ -16,6 +17,7 @@ VORP/RedM Resource fuer ein Bürgermeistersystem mit Rathaeusern und Markthallen
 - Bürgermeister/Admin kann Bürger verwalten, Bekanntmachungen senden und Auszahlungen aus der Stadtkasse machen.
 - Bei aktiven Wahlen erhalten bestaetigte Bürger der jeweiligen Stadt stuendlich eine Notify-Meldung.
 - Bürgermeister koennen bestaetigten Bürgern Jobs aus dem jeweiligen Stadtblock `Config.Towns[stadt].MayorJobs.Jobs` zuweisen.
+- Artikelsteuern werden in der Verwaltung getrennt nach den Reitern `Waren` und `Waffen` gepflegt.
 - Discord-Webhooks koennen ueber `Config.Discord` fuer Wahlen, Bürgeraktionen, Jobs, Steuern und Stadtkasse aktiviert werden.
 
 ## Installation
@@ -37,12 +39,12 @@ ensure ptv_cityhall
 
 ## Version und Updatechecker
 
-- Diese Ausgabe ist als Version `1.1` gesetzt (`fxmanifest.lua` und `Config.Version`).
+- Diese Ausgabe ist als Version `1.2` gesetzt (`fxmanifest.lua` und `Config.Version`).
 - Der Updatechecker schreibt beim Resource-Start in die CFX-Konsole.
 - Der Updatechecker ist auf `https://api.github.com/repos/PlanktonTVT/ptv_cityhall/releases/latest` eingestellt.
 - Der Download-Link zeigt auf `https://github.com/PlanktonTVT/ptv_cityhall/releases/latest`.
 - Damit echte Updates erkannt werden, muss auf GitHub immer die neueste Release-Version als Release angelegt sein.
-- Als Text reicht eine Datei, deren erste Zeile die neuste Version enthaelt, z. B. `1.1`.
+- Als Text reicht eine Datei, deren erste Zeile die neuste Version enthaelt, z. B. `1.2`.
 - Als JSON werden Felder wie `version`, `latest`, `latestVersion` oder `tag_name` erkannt; optional auch `download`, `downloadUrl`, `url`, `html_url`, `changelog`, `notes` oder `body`.
 - Manuell kann der Check in der CFX-Konsole mit `ptv_cityhall_updatecheck` gestartet werden.
 
@@ -119,6 +121,7 @@ Scrollbar-Farben, Breite und Rundung werden direkt in `html/style.css` ueber die
 - Spieler koennen im Markthallenfenster einen Bürgerantrag fuer die aktive Stadt stellen.
 - Der Bürgermeister/Admin sieht im Bereich `Verwaltung` offene Antraege und bestaetigte Bürger seiner Stadt.
 - Die Anzeige nutzt bevorzugt Vor- und Nachname aus der VORP-Tabelle `characters`; falls das Schema abweicht, wird der gespeicherte Antragsname aus `bm_citizens` verwendet.
+- `Config.Citizenship.ApplyCooldownDays = 14` setzt einen globalen Buergerantrags-Cooldown pro Charakter. Erst nach Ablauf kann der Charakter wieder einen Buergerantrag stellen. `0` deaktiviert den Cooldown.
 - Offene Antraege koennen bestaetigt oder abgelehnt werden.
 - Bestaetigte Bürger koennen aus der Stadt entfernt werden.
 - Bestaetigten Bürgern kann der Bürgermeister im Verwaltungsfenster per Dropdown einen Job zuweisen.
@@ -146,6 +149,7 @@ Scrollbar-Farben, Breite und Rundung werden direkt in `html/style.css` ueber die
 - Mit `Config.Market.UseConfigPrices = true` werden die `buyPrice`-/`sellPrice`-Werte aus der Config bei jedem Start und Oeffnen auf jede Markthalle uebernommen.
 - Die Markthalle hat einen eigenen Bestand pro Stadt in `bm_market_stock`.
 - Buergermeister/Admins koennen in der Verwaltung fuer jeden einzelnen Artikel und jede einzelne Waffe eigene Einkauf- und Verkaufsteuern setzen.
+- Die Artikelsteuer-Verwaltung ist in Reiter getrennt, z. B. `Waren` und `Waffen`.
 - Jede Stadt kann einzelne Waren/Waffen im Verwaltungsfenster per Häkchen aktivieren oder deaktivieren; deaktivierte Gueter werden in der Markthallenansicht ausgeblendet und koennen nicht gekauft, verkauft oder eingestellt werden.
 - Bürgermeister/Admins sehen im Verwaltungsfenster ein Markthallenlager, koennen Bestand kostenlos entnehmen oder Bestand exportieren.
 - Exports, Entnahmen und Aktivieren/Deaktivieren werden im Reiter `Logs` angezeigt und bei aktivem Discord-Webhook gepostet.
@@ -160,7 +164,7 @@ Scrollbar-Farben, Breite und Rundung werden direkt in `html/style.css` ueber die
 - Wenn `Config.Market.UseConfigPrices = false` gesetzt ist, koennen nur Admins aus `users.group` Einkaufspreis und Verkaufspreis im separaten `/markthalle_admin` Fenster setzen.
 - Die aktuellen Steuersaetze werden in der Markthalle und im Bürgermeisteramt angezeigt.
 - Die Einkaufsteuer und Verkaufsteuer sind pro Artikel getrennt. Einkauf muss mindestens 5% betragen, Verkauf mindestens 6%, und die Verkaufsteuer muss mindestens 1 Prozentpunkt hoeher sein als die Einkaufsteuer.
-- Nur Admins aus `users.group` koennen die Steuersaetze im separaten `/markthalle_admin` Fenster oder per `/bm_admin settax [waren_einkauf] [waren_verkauf] [waffen_einkauf] [waffen_verkauf]` setzen.
+- Buergermeister/Admins setzen artikelgenaue Steuern in der Verwaltung; globale Reiter-Steuern im separaten `/markthalle_admin` Fenster oder per `/bm_admin settax [waren_einkauf] [waren_verkauf] [waffen_einkauf] [waffen_verkauf]` bleiben Admins aus `users.group` vorbehalten.
 - Die alten Reiter-Steuern bleiben als Fallback und fuer Admin-Kommandos bestehen; im Markt verwendet die Resource die artikelgenauen Steuersaetze aus `bm_market_stock`.
 - Beim Einstellen wird das Item direkt aus dem Inventar genommen.
 - Beim Einkauf aus der Markthalle zahlt der Kaeufer Einkaufspreis plus Einkaufsteuer.

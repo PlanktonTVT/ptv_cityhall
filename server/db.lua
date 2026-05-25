@@ -160,6 +160,7 @@ local migrations = {
             PRIMARY KEY (id),
             UNIQUE KEY uniq_bm_citizen_town_char (town_id, charid),
             KEY idx_bm_citizens_town_status (town_id, status),
+            KEY idx_bm_citizens_char_created (charid, created_at),
             CONSTRAINT fk_bm_citizens_town
                 FOREIGN KEY (town_id) REFERENCES bm_towns(id)
                 ON DELETE CASCADE
@@ -286,6 +287,7 @@ function BMDB.bootstrap()
 
     BMDB.ensureTownTaxColumns()
     BMDB.ensureMarketStockColumns()
+    BMDB.ensureCitizenIndexes()
 end
 
 function BMDB.ensureTownTaxColumns()
@@ -345,6 +347,13 @@ function BMDB.ensureMarketStockColumns()
     end
 end
 
+function BMDB.ensureCitizenIndexes()
+    local rows = MySQL.query.await("SHOW INDEX FROM bm_citizens WHERE Key_name = 'idx_bm_citizens_char_created'") or {}
+    if not rows[1] then
+        MySQL.query.await('ALTER TABLE bm_citizens ADD KEY idx_bm_citizens_char_created (charid, created_at)')
+    end
+end
+
 function BMDB.ensureTown()
     local townKey = BMDB.defaultTownKey()
     return BMDB.ensureTownByKey(townKey)
@@ -394,6 +403,22 @@ function BMDB.citizenship(townId, charid)
     local rows = MySQL.query.await(
         'SELECT * FROM bm_citizens WHERE town_id = ? AND charid = ? LIMIT 1',
         { townId, tostring(charid) }
+    )
+
+    return rows and rows[1] or nil
+end
+
+function BMDB.latestCitizenshipByChar(charid)
+    local rows = MySQL.query.await(
+        [[
+            SELECT c.*, t.name AS town_name
+            FROM bm_citizens c
+            LEFT JOIN bm_towns t ON t.id = c.town_id
+            WHERE c.charid = ?
+            ORDER BY c.created_at DESC, c.updated_at DESC, c.id DESC
+            LIMIT 1
+        ]],
+        { tostring(charid) }
     )
 
     return rows and rows[1] or nil
